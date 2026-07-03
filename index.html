@@ -1,0 +1,168 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Block Inventory</title>
+<style>
+  :root { --bg:#f4f5f7; --card:#fff; --ink:#1a1d21; --muted:#666; --accent:#2f6fed; --line:#e3e6ea; }
+  * { box-sizing: border-box; }
+  html { -webkit-text-size-adjust: 100%; }
+  body { margin:0; font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+         background:var(--bg); color:var(--ink); font-size:18px; line-height:1.4; }
+  .wrap { max-width:640px; margin:0 auto; padding:16px; }
+  header { display:flex; align-items:center; justify-content:space-between; gap:12px;
+           padding:14px 16px; }
+  header h1 { font-size:19px; margin:0; }
+  header a { font-size:14px; color:var(--muted); text-decoration:none; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:14px;
+          padding:18px; margin-bottom:16px; }
+  h2 { margin:0 0 4px; font-size:30px; letter-spacing:0.5px; }
+  h3 { margin:18px 0 8px; font-size:15px; text-transform:uppercase; letter-spacing:0.5px; color:var(--muted); }
+  .meta { color:var(--muted); margin-bottom:8px; }
+  .loc { font-size:20px; margin-top:6px; }
+  ul { margin:0; padding-left:22px; }
+  li { margin:6px 0; }
+  .notes { color:var(--muted); font-size:15px; }
+  .empty { color:var(--muted); }
+  input[type=text], input[type=password] {
+    width:100%; padding:14px 16px; font-size:18px; border:1px solid var(--line);
+    border-radius:12px; background:#fff; }
+  button { width:100%; padding:14px; font-size:18px; font-weight:600; color:#fff;
+           background:var(--accent); border:none; border-radius:12px; margin-top:12px; }
+  label.remember { display:flex; align-items:center; gap:10px; margin-top:14px;
+                   font-size:16px; color:var(--muted); }
+  label.remember input { width:20px; height:20px; }
+  .err { color:#c0392b; margin-top:12px; min-height:22px; }
+  .hit { display:flex; justify-content:space-between; gap:12px; padding:12px 4px;
+         border-bottom:1px solid var(--line); }
+  .hit span { color:var(--muted); font-size:15px; text-align:right; }
+  #searchwrap h3 { margin-top:0; }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg:#16181c; --card:#20242a; --ink:#e9ebee; --muted:#9aa0a6; --line:#2f343b; }
+    input[type=text], input[type=password] { background:#181b1f; color:var(--ink); }
+  }
+</style>
+</head>
+<body>
+
+<div class="wrap" id="lock">
+  <div class="card">
+    <h2>🔒 Locked</h2>
+    <p class="meta">Enter the passcode to view the inventory.</p>
+    <form id="lockform">
+      <input type="password" id="pass" autocomplete="current-password" placeholder="Passcode" autofocus>
+      <label class="remember"><input type="checkbox" id="remember" checked> Remember this device</label>
+      <button type="submit">Unlock</button>
+      <div class="err" id="err"></div>
+    </form>
+  </div>
+</div>
+
+<div id="app" hidden>
+  <header>
+    <h1>Block Inventory</h1>
+    <a href="#" id="forget">Forget device</a>
+  </header>
+  <div class="wrap">
+    <div id="box"></div>
+    <div class="card" id="searchwrap">
+      <h3>Find an item</h3>
+      <input type="text" id="q" placeholder="e.g. angle grinder" autocomplete="off">
+      <div id="results"></div>
+    </div>
+  </div>
+</div>
+
+<script>
+const $ = s => document.querySelector(s);
+const PP_KEY = "blockinv_pp";
+let DATA = null;
+
+const b64 = s => Uint8Array.from(atob(s), c => c.charCodeAt(0));
+const esc = s => (s ?? "").replace(/[&<>]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c]));
+
+async function decryptBundle(pass) {
+  const blob = await fetch("data.enc", { cache: "no-store" }).then(r => {
+    if (!r.ok) throw new Error("data.enc not found");
+    return r.json();
+  });
+  const km = await crypto.subtle.importKey("raw", new TextEncoder().encode(pass), "PBKDF2", false, ["deriveKey"]);
+  const key = await crypto.subtle.deriveKey(
+    { name: "PBKDF2", salt: b64(blob.salt), iterations: blob.iter, hash: "SHA-256" },
+    km, { name: "AES-GCM", length: 256 }, false, ["decrypt"]);
+  const pt = await crypto.subtle.decrypt({ name: "AES-GCM", iv: b64(blob.iv) }, key, b64(blob.ct));
+  return JSON.parse(new TextDecoder().decode(pt));
+}
+
+async function unlock(pass, remember) {
+  DATA = await decryptBundle(pass);           // throws on wrong passcode
+  if (remember) localStorage.setItem(PP_KEY, pass);
+  $("#lock").hidden = true;
+  $("#app").hidden = false;
+  render();
+}
+
+function prettyLoc(loc) {
+  if (!loc) return "Not placed yet";
+  const p = DATA.places[loc];
+  return p?.label || loc.split("/").join(" · ");
+}
+const boxLoc = box => prettyLoc(box?.loc || "");
+
+function itemLocation(it) {
+  if (it.box) return { box: it.box, loc: boxLoc(DATA.boxes.find(b => b.id === it.box)) };
+  return { box: null, loc: prettyLoc(it.loc || "") };
+}
+
+function renderBox() {
+  const id = new URLSearchParams(location.search).get("b");
+  const el = $("#box");
+  if (!id) { el.innerHTML = ""; return; }
+  const box = DATA.boxes.find(b => b.id === id);
+  if (!box) { el.innerHTML = `<div class="card"><h2>${esc(id)}</h2><p class="empty">Unknown box.</p></div>`; return; }
+  const typeDesc = box.type ? (DATA.types[box.type] ? `${esc(box.type)} — ${esc(DATA.types[box.type])}` : esc(box.type)) : "";
+  const contents = DATA.items.filter(i => i.box === id);
+  el.innerHTML = `<div class="card">
+    <h2>${esc(id)}</h2>
+    ${typeDesc ? `<div class="meta">${typeDesc}</div>` : ""}
+    <div class="loc">📍 ${esc(boxLoc(box))}</div>
+    <h3>Contents (${contents.length})</h3>
+    ${contents.length
+      ? "<ul>" + contents.map(i => `<li>${esc(i.name)}${i.qty > 1 ? ` ×${i.qty}` : ""}${i.notes ? ` <span class="notes">${esc(i.notes)}</span>` : ""}</li>`).join("") + "</ul>"
+      : `<p class="empty">No items recorded yet.</p>`}
+  </div>`;
+}
+
+function renderSearch(q) {
+  const res = $("#results");
+  q = q.trim().toLowerCase();
+  if (!q) { res.innerHTML = ""; return; }
+  const hits = DATA.items.filter(i =>
+    (i.name || "").toLowerCase().includes(q) || (i.notes || "").toLowerCase().includes(q)).slice(0, 50);
+  res.innerHTML = hits.length
+    ? hits.map(i => { const L = itemLocation(i);
+        return `<div class="hit"><b>${esc(i.name)}</b><span>${L.box ? esc(L.box) + " · " : ""}${esc(L.loc)}</span></div>`; }).join("")
+    : `<p class="empty">No matches.</p>`;
+}
+
+function render() {
+  renderBox();
+  $("#q").oninput = e => renderSearch(e.target.value);
+}
+
+$("#lockform").onsubmit = async e => {
+  e.preventDefault();
+  $("#err").textContent = "";
+  try { await unlock($("#pass").value, $("#remember").checked); }
+  catch { $("#err").textContent = "Wrong passcode."; }
+};
+$("#forget").onclick = e => { e.preventDefault(); localStorage.removeItem(PP_KEY); location.reload(); };
+
+(async () => {                                  // auto-unlock on a remembered device
+  const saved = localStorage.getItem(PP_KEY);
+  if (saved) { try { await unlock(saved, true); } catch { localStorage.removeItem(PP_KEY); } }
+})();
+</script>
+</body>
+</html>
