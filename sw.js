@@ -1,6 +1,6 @@
 // Block Inventory service worker — offline support.
 // Bump CACHE when the app shell changes so clients pick up the new version.
-const CACHE = "blockinv-v1";
+const CACHE = "blockinv-v2";
 const SHELL = ["./", "./index.html", "./manifest.webmanifest", "./icon-192.png", "./icon-512.png", "./icon-180.png"];
 
 self.addEventListener("install", e => {
@@ -26,8 +26,12 @@ self.addEventListener("fetch", e => {
     return;
   }
 
-  // app shell: cache-first, refresh in background.
-  e.respondWith(caches.match(e.request).then(c =>
-    c || fetch(e.request).then(r => { const cp = r.clone(); caches.open(CACHE).then(cc => cc.put(e.request, cp)); return r; })
-  ));
+  // app shell: stale-while-revalidate — serve cache fast, refresh cache in the background
+  // so shell edits (favicon, layout) propagate on the next load without bumping CACHE.
+  e.respondWith(caches.match(e.request).then(cached => {
+    const fresh = fetch(e.request)
+      .then(r => { const cp = r.clone(); caches.open(CACHE).then(cc => cc.put(e.request, cp)); return r; })
+      .catch(() => cached);
+    return cached || fresh;
+  }));
 });
