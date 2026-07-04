@@ -138,7 +138,7 @@ function loadPhoto(id) {
 }
 
 // ---- helpers ----
-const boxLabel = id => { const n = parseInt(String(id).replace(/\D/g, ""), 10); return `${esc(id)} - Box ${isNaN(n)?"":n}`; };
+const boxLabel = box => { const id=box.id; const n = parseInt(String(id).replace(/\D/g, ""), 10); const nick = box.nickname ? ` <span class="notes">${esc(box.nickname)}</span>` : ""; return `${esc(id)} - Box ${isNaN(n)?"":n}${nick}`; };
 function prettyLoc(loc){ if(!loc) return "Not placed yet"; const p=DATA.places[loc]; return p?.label || loc.split("/").join(" · "); }
 const boxLoc = box => prettyLoc(box?.loc || "");
 function itemLocation(it){ if(it.box) return {box:it.box, loc:boxLoc(DATA.boxes.find(b=>b.id===it.box))}; return {box:null, loc:prettyLoc(it.loc||"")}; }
@@ -170,7 +170,7 @@ function itemRow(i){
 function boxRow(b){
   const n = DATA.items.filter(i=>i.box===b.id).length;
   return `<div class="row" data-box="${esc(b.id)}">
-    <div><b>${boxLabel(b.id)}</b><div class="sub">${esc(typeDescOf(b))}</div></div>
+    <div><b>${boxLabel(b)}</b><div class="sub">${esc(typeDescOf(b))}</div></div>
     <div class="right">${esc(b.loc?boxLoc(b):"Not placed")}<div class="sub">${n} item${n!==1?"s":""}</div></div>
   </div>`;
 }
@@ -187,6 +187,7 @@ function renderBoxList(q){
   const list=$("#boxlist"); q=(q||"").trim().toLowerCase();
   const boxes=DATA.boxes.filter(b=> !q ||
     b.id.toLowerCase().includes(q) ||
+    (b.nickname||"").toLowerCase().includes(q) ||
     (typeDescOf(b)||"").toLowerCase().includes(q) ||
     boxLoc(b).toLowerCase().includes(q));
   list.innerHTML=boxes.length?boxes.map(boxRow).join(""):`<p class="empty">No boxes.</p>`;
@@ -207,7 +208,7 @@ function renderBoxView(id){
   $("#view").innerHTML=`
     <a class="back" href="#/">‹ All boxes</a>
     <div class="card">
-      <h2>${boxLabel(id)}</h2>
+      <h2>${boxLabel(box)}</h2>
       ${box.type?`<div class="meta">${esc(box.type)}${td?` — ${esc(td)}`:""}</div>`:""}
       <div class="loc">📍 ${esc(box.loc?boxLoc(box):"Not placed yet")}</div>
       ${(DATA.photos||[]).includes(id)?`<div class="photo" id="boxphoto"><div class="ph">Loading photo…</div></div>`:""}
