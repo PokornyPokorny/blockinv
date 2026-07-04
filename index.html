@@ -31,6 +31,10 @@
   h3 { margin:0 0 8px; font-size:15px; text-transform:uppercase; letter-spacing:0.5px; color:var(--muted); }
   .meta { color:var(--muted); margin-bottom:8px; }
   .loc { font-size:20px; margin-top:6px; }
+  .photo { margin:14px 0 2px; }
+  .photo img { width:100%; border-radius:10px; display:block; }
+  .photo .ph { color:var(--muted); font-size:14px; text-align:center; padding:28px 12px;
+               background:rgba(127,127,127,.08); border-radius:10px; }
   ul { margin:0; padding-left:22px; }
   li { margin:6px 0; }
   .notes { color:var(--muted); font-size:15px; }
@@ -87,7 +91,7 @@
 <script>
 const $ = s => document.querySelector(s);
 const PP_KEY = "blockinv_pp";
-let DATA = null;
+let DATA = null, PHOTO_KEY = null, lastPhotoURL = null;
 
 const b64 = s => Uint8Array.from(atob(s), c => c.charCodeAt(0));
 const esc = s => (s ?? "").replace(/[&<>]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c]));
@@ -107,10 +111,30 @@ async function decryptBundle(pass) {
 }
 async function unlock(pass, remember) {
   DATA = await decryptBundle(pass);            // throws on wrong passcode
+  // stable photo key (fixed salt) — matches publish.py PHOTO_SALT
+  const km = await crypto.subtle.importKey("raw", new TextEncoder().encode(pass), "PBKDF2", false, ["deriveKey"]);
+  PHOTO_KEY = await crypto.subtle.deriveKey(
+    { name: "PBKDF2", salt: new TextEncoder().encode("blockinv/photos/v1"), iterations: 210000, hash: "SHA-256" },
+    km, { name: "AES-GCM", length: 256 }, false, ["decrypt"]);
   if (remember) localStorage.setItem(PP_KEY, pass);
   $("#lock").hidden = true;
   $("#app").hidden = false;
   initRoute();
+}
+
+async function photoURL(id) {
+  const buf = new Uint8Array(await fetch("photos/" + id + ".enc", { cache: "no-store" })
+    .then(r => { if (!r.ok) throw new Error("no photo"); return r.arrayBuffer(); }));
+  const pt = await crypto.subtle.decrypt({ name: "AES-GCM", iv: buf.slice(0, 12) }, PHOTO_KEY, buf.slice(12));
+  return URL.createObjectURL(new Blob([pt], { type: "image/jpeg" }));
+}
+function loadPhoto(id) {
+  photoURL(id).then(url => {
+    if (lastPhotoURL) URL.revokeObjectURL(lastPhotoURL);
+    lastPhotoURL = url;
+    const el = document.getElementById("boxphoto");
+    if (el) el.innerHTML = `<img src="${url}" alt="photo of box ${esc(id)}">`;
+  }).catch(() => { document.getElementById("boxphoto")?.remove(); });
 }
 
 // ---- helpers ----
@@ -186,11 +210,13 @@ function renderBoxView(id){
       <h2>${boxLabel(id)}</h2>
       ${box.type?`<div class="meta">${esc(box.type)}${td?` — ${esc(td)}`:""}</div>`:""}
       <div class="loc">📍 ${esc(box.loc?boxLoc(box):"Not placed yet")}</div>
+      ${(DATA.photos||[]).includes(id)?`<div class="photo" id="boxphoto"><div class="ph">Loading photo…</div></div>`:""}
       <h3 style="margin-top:18px">Contents (${contents.length})</h3>
       ${contents.length
         ? "<ul>"+contents.map(i=>`<li>${esc(i.name)}${i.qty>1?` ×${i.qty}`:""}${i.notes?` <span class="notes">${esc(i.notes)}</span>`:""} <span class="code">${esc(i.id)}</span></li>`).join("")+"</ul>"
         : `<p class="empty">No items recorded yet.</p>`}
     </div>`;
+  if ((DATA.photos || []).includes(id)) loadPhoto(id);
 }
 
 // ---- routing (QR opens ?b=<id>; in-app nav uses #/b/<id>) ----
