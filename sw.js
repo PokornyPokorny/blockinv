@@ -1,6 +1,6 @@
 // Block Inventory service worker — offline support.
 // Bump CACHE when the app shell changes so clients pick up the new version.
-const CACHE = "blockinv-v2";
+const CACHE = "blockinv-v3";
 const SHELL = ["./", "./index.html", "./manifest.webmanifest", "./icon-192.png", "./icon-512.png", "./icon-180.png"];
 
 self.addEventListener("install", e => {
