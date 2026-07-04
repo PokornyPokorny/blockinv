@@ -31,10 +31,18 @@
   h3 { margin:0 0 8px; font-size:15px; text-transform:uppercase; letter-spacing:0.5px; color:var(--muted); }
   .meta { color:var(--muted); margin-bottom:8px; }
   .loc { font-size:20px; margin-top:6px; }
-  .photo { margin:14px 0 2px; }
-  .photo img { width:100%; border-radius:10px; display:block; }
-  .photo .ph { color:var(--muted); font-size:14px; text-align:center; padding:28px 12px;
-               background:rgba(127,127,127,.08); border-radius:10px; }
+  .photostrip { display:flex; gap:8px; margin:14px 0 2px; }
+  .photostrip figure { flex:1; min-width:0; margin:0; display:flex; flex-direction:column; gap:5px; }
+  .photostrip figcaption { font-size:12px; text-transform:uppercase; letter-spacing:0.5px; color:var(--muted); text-align:center; }
+  /* equal-size landscape tiles; image fills (no letterbox card), tap to see the whole shot */
+  .photostrip img, .photostrip .ph { width:100%; aspect-ratio:17/10; border-radius:10px; display:block; }
+  .photostrip img { object-fit:cover; cursor:zoom-in; }
+  .photostrip .ph { background:rgba(127,127,127,.08); color:var(--muted); font-size:13px;
+    text-align:center; display:flex; align-items:center; justify-content:center; }
+  .lightbox { position:fixed; inset:0; background:rgba(0,0,0,.9); display:flex; align-items:center;
+    justify-content:center; padding:20px; z-index:100; cursor:zoom-out; }
+  .lightbox[hidden] { display:none; }
+  .lightbox img { max-width:100%; max-height:100%; border-radius:10px; }
   ul { margin:0; padding-left:22px; }
   li { margin:6px 0; }
   .notes { color:var(--muted); font-size:15px; }
@@ -88,10 +96,12 @@
   <div class="wrap" id="view"></div>
 </div>
 
+<div class="lightbox" id="lightbox" hidden><img alt=""></div>
+
 <script>
 const $ = s => document.querySelector(s);
 const PP_KEY = "blockinv_pp";
-let DATA = null, PHOTO_KEY = null, lastPhotoURL = null;
+let DATA = null, PHOTO_KEY = null, photoURLs = [];
 
 const b64 = s => Uint8Array.from(atob(s), c => c.charCodeAt(0));
 const esc = s => (s ?? "").replace(/[&<>]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c]));
@@ -128,13 +138,12 @@ async function photoURL(id) {
   const pt = await crypto.subtle.decrypt({ name: "AES-GCM", iv: buf.slice(0, 12) }, PHOTO_KEY, buf.slice(12));
   return URL.createObjectURL(new Blob([pt], { type: "image/jpeg" }));
 }
-function loadPhoto(id) {
-  photoURL(id).then(url => {
-    if (lastPhotoURL) URL.revokeObjectURL(lastPhotoURL);
-    lastPhotoURL = url;
-    const el = document.getElementById("boxphoto");
-    if (el) el.innerHTML = `<img src="${url}" alt="photo of box ${esc(id)}">`;
-  }).catch(() => { document.getElementById("boxphoto")?.remove(); });
+function loadPhoto(photoId, elId, alt) {
+  photoURL(photoId).then(url => {
+    photoURLs.push(url);
+    const el = document.getElementById(elId);
+    if (el) el.querySelector(".ph").outerHTML = `<img src="${url}" alt="${esc(alt)}">`;
+  }).catch(() => { document.getElementById(elId)?.remove(); });
 }
 
 // ---- helpers ----
@@ -200,7 +209,16 @@ function renderHome(){
 }
 
 // ---- BOX detail ----
+function photoFig(photoId, elId, cap){
+  return (DATA.photos||[]).includes(photoId)
+    ? `<figure id="${elId}"><div class="ph">Loading…</div><figcaption>${cap}</figcaption></figure>` : "";
+}
+function photoStrip(id){
+  const figs = photoFig(id+"-ext","boxphoto-ext","Outside") + photoFig(id,"boxphoto","Inside");
+  return figs ? `<div class="photostrip">${figs}</div>` : "";
+}
 function renderBoxView(id){
+  photoURLs.forEach(URL.revokeObjectURL); photoURLs = [];   // free the previous view's blobs
   const box=DATA.boxes.find(b=>b.id===id);
   if(!box){ $("#view").innerHTML=`<a class="back" href="#/">‹ All boxes</a><div class="card"><h2>${esc(id)}</h2><p class="empty">Unknown box.</p></div>`; return; }
   const td=typeDescOf(box);
@@ -209,15 +227,17 @@ function renderBoxView(id){
     <a class="back" href="#/">‹ All boxes</a>
     <div class="card">
       <h2>${boxLabel(box)}</h2>
-      ${box.type?`<div class="meta">${esc(box.type)}${td?` — ${esc(td)}`:""}</div>`:""}
+      ${td?`<div class="meta">${esc(td)}</div>`:""}
       <div class="loc">📍 ${esc(box.loc?boxLoc(box):"Not placed yet")}</div>
-      ${(DATA.photos||[]).includes(id)?`<div class="photo" id="boxphoto"><div class="ph">Loading photo…</div></div>`:""}
+      ${photoStrip(id)}
       <h3 style="margin-top:18px">Contents (${contents.length})</h3>
       ${contents.length
         ? "<ul>"+contents.map(i=>`<li>${esc(i.name)}${i.qty>1?` ×${i.qty}`:""}${i.notes?` <span class="notes">${esc(i.notes)}</span>`:""} <span class="code">${esc(i.id)}</span></li>`).join("")+"</ul>"
         : `<p class="empty">No items recorded yet.</p>`}
     </div>`;
-  if ((DATA.photos || []).includes(id)) loadPhoto(id);
+  const has = pid => (DATA.photos||[]).includes(pid);
+  if (has(id+"-ext")) loadPhoto(id+"-ext","boxphoto-ext",`outside of box ${id}`);
+  if (has(id))        loadPhoto(id,"boxphoto",`inside of box ${id}`);
 }
 
 // ---- routing (QR opens ?b=<id>; in-app nav uses #/b/<id>) ----
@@ -231,9 +251,12 @@ function initRoute(){
   route();
 }
 $("#app").addEventListener("click", e=>{
+  const img=e.target.closest(".photostrip img");
+  if(img){ const lb=$("#lightbox"); lb.querySelector("img").src=img.src; lb.hidden=false; return; }
   const row=e.target.closest("[data-box]");
   if(row) location.hash="#/b/"+encodeURIComponent(row.dataset.box);
 });
+$("#lightbox").onclick = () => $("#lightbox").hidden = true;
 window.addEventListener("hashchange", route);
 
 // ---- lock form ----
