@@ -18,7 +18,9 @@
   * { box-sizing: border-box; }
   html { -webkit-text-size-adjust: 100%; }
   body { margin:0; font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
-         background:var(--bg); color:var(--ink); font-size:18px; line-height:1.4; }
+         background:var(--bg); color:var(--ink); font-size:18px; line-height:1.4;
+         /* clear the iPhone status bar / Dynamic Island in standalone (home-screen) mode */
+         padding-top: env(safe-area-inset-top, 0px); }
   .wrap { max-width:640px; margin:0 auto; padding:16px; }
   header { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:14px 16px; max-width:640px; margin:0 auto; }
   header h1 { font-size:19px; margin:0; }
