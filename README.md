@@ -1,7 +1,6 @@
 # blockinv — Block Inventory lookup
 
-Static, encrypted lookup page for **Block Inventory**, a home tool/box tracking system.
-Live at **https://pokornypokorny.github.io/blockinv/**.
+Static, encrypted lookup page for **Block Inventory**, a private home tool/box tracking system.
 
 ## What it does
 
